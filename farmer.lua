@@ -1,4 +1,4 @@
--- MECHANIK HUB V12 - ИСПРАВЛЕННЫЙ (Шериф + голосование)
+-- MECHANIK HUB V13 - УБЕГАНИЕ ОТ УБИЙЦЫ + НЕТ ПРЫЖКОВ В ЛОББИ
 local p = game.Players.LocalPlayer
 local r = false
 local c = 0
@@ -23,6 +23,7 @@ local LOBBY_POS = Vector3.new(14.1, 517.0, -25.2)
 local LOBBY_RADIUS = 40
 local KILL_DISTANCE = 5
 local DANGER_DISTANCE = 25
+local ESCAPE_DISTANCE = 50
 local SHOOT_DISTANCE = 50
 local THINK_POINT = Vector3.new(13.8, 507.4, 34.4)
 local MAP_POINTS = {
@@ -34,10 +35,7 @@ local MAP_POINTS = {
 local MAX_RUNTIME = 6 * 3600
 local runtime = 0
 local autoShutdownEnabled = true
-local tired = false
 local sessionTime = 0
-local mistakeCounter = 0
-local randomStops = {}
 
 local path = PathfindingService:CreatePath({
     AgentRadius = 3.5,
@@ -89,26 +87,20 @@ local function getKnife(char)
     return nil
 end
 
--- ===== УЛУЧШЕННЫЙ ПОИСК ПИСТОЛЕТА =====
 local function getGun(char)
     char = char or p.Character
     if not char then return nil end
-    
-    -- Ищем в руках
     for _, v in ipairs(char:GetChildren()) do
         if v:IsA("Tool") then
             local name = v.Name:lower()
             if name:find("gun") or name:find("pistol") or name:find("revolver") or name:find("sheriff") then
                 return v
             end
-            -- Проверяем по скриптам
             if v:FindFirstChild("GunScriptR15") or v:FindFirstChild("GunScriptR6") or v:FindFirstChild("GunServer") then
                 return v
             end
         end
     end
-    
-    -- Ищем в бекпаке
     for _, v in ipairs(p.Backpack:GetChildren()) do
         if v:IsA("Tool") then
             local name = v.Name:lower()
@@ -121,6 +113,18 @@ local function getGun(char)
         end
     end
     return nil
+end
+
+-- ===== УБЕГАНИЕ ОТ УБИЙЦЫ =====
+local function escapeFromMurderer(rootPos, murdererPos)
+    if not murdererPos then return false end
+    local dir = (rootPos - murdererPos).Unit
+    local escapePos = rootPos + dir * ESCAPE_DISTANCE + Vector3.new(math.random(-10, 10), 0, math.random(-10, 10))
+    -- Ограничиваем по Y, чтобы не улететь
+    escapePos = Vector3.new(escapePos.X, rootPos.Y, escapePos.Z)
+    if g and g.sl then g.sl.Text = "🏃 Убегаю от убийцы!" end
+    walkToTarget(escapePos)
+    return true
 end
 
 local function walkToTarget(targetPos)
@@ -180,6 +184,11 @@ end
 local function spamJump()
     local char = p.Character
     if not char then return end
+    -- НЕ ПРЫГАЕМ В ЛОББИ
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if root and isInLobby(root.Position) then
+        return
+    end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
     hum:ChangeState(Enum.HumanoidStateType.Jumping)
@@ -192,6 +201,15 @@ local function isMurdererNear(rootPos)
     local tRoot = target.Character:FindFirstChild("HumanoidRootPart")
     if not tRoot then return false end
     return (rootPos - tRoot.Position).Magnitude < DANGER_DISTANCE
+end
+
+local function getMurdererPos()
+    if not Murderer then return nil end
+    local target = Players:FindFirstChild(Murderer)
+    if not target or not target.Character then return nil end
+    local tRoot = target.Character:FindFirstChild("HumanoidRootPart")
+    if not tRoot then return nil end
+    return tRoot.Position
 end
 
 local function isSheriffOrHeroNear(rootPos)
@@ -255,19 +273,15 @@ local function randomMouseMove()
     end)
 end
 
--- ===== ИСПРАВЛЕННОЕ ГОЛОСОВАНИЕ =====
 local function voteForMap()
     local char = p.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
     if not root then return end
     
-    -- ЕСЛИ МЫ УЖЕ НА КАРТЕ (НЕ В ЛОББИ) — НЕ ГОЛОСУЕМ
     if not isInLobby(root.Position) then
         return
     end
-    
-    -- ЕСЛИ РАУНД УЖЕ АКТИВЕН — НЕ ГОЛОСУЕМ
     if isRoundActive() then
         return
     end
@@ -292,7 +306,6 @@ local function voteForMap()
     if g and g.sl then g.sl.Text = "✅ Проголосовал, жду раунд" end
 end
 
--- ===== ИСПРАВЛЕННЫЙ РЕЖИМ ШЕРИФА =====
 local function sheriffMode()
     while r and farmMode and Sheriff == p.Name do
         task.wait(0.1)
@@ -302,11 +315,9 @@ local function sheriffMode()
         local root = char:FindFirstChild("HumanoidRootPart")
         if not hum or not root or hum.Health <= 0 then continue end
 
-        -- СНАЧАЛА БЕРЁМ ПИСТОЛЕТ
         local gun = getGun(char)
         if not gun then
             if g and g.sl then g.sl.Text = "🔫 Ищу пистолет..." end
-            -- Проверяем бекпак
             for _, v in ipairs(p.Backpack:GetChildren()) do
                 if v:IsA("Tool") then
                     local name = v.Name:lower()
@@ -323,7 +334,6 @@ local function sheriffMode()
             end
         end
 
-        -- ЭКИПИРУЕМ ПИСТОЛЕТ
         pcall(function()
             hum:EquipTool(gun)
         end)
@@ -366,7 +376,6 @@ local function sheriffMode()
         task.wait(math.random(0.5, 1.5))
         randomMouseMove()
 
-        -- ПЕРВЫЙ ВЫСТРЕЛ (всегда промах)
         if g and g.sl then g.sl.Text = "💨 Промах!" end
         pcall(function()
             local fakeTarget = tRoot.Position + Vector3.new(math.random(-10, 10), math.random(-5, 5), math.random(-10, 10))
@@ -381,7 +390,6 @@ local function sheriffMode()
         end)
         task.wait(0.5)
 
-        -- ВТОРОЙ ВЫСТРЕЛ (50% шанс)
         if math.random(1, 100) <= 50 then
             if g and g.sl then g.sl.Text = "🎯 ПОПАЛ!" end
             pcall(function()
@@ -410,10 +418,13 @@ local function autoKill()
         local root = char:FindFirstChild("HumanoidRootPart")
         if not hum or not root or hum.Health <= 0 then continue end
 
+        -- Проверяем, не нужно ли убегать от шерифа/героя
         if isSheriffOrHeroNear(root.Position) then
-            spamJump()
-            wait(0.05)
-            spamJump()
+            if g and g.sl then g.sl.Text = "🏃 Убегаю от шерифа!" end
+            local escapePos = root.Position + Vector3.new(math.random(-50, 50), 0, math.random(-50, 50))
+            walkToTarget(escapePos)
+            wait(0.5)
+            continue
         end
 
         if isStuck(root) then
@@ -472,6 +483,7 @@ local function autoKill()
     end
 end
 
+-- ===== ОБНОВЛЁННЫЙ ЦИКЛ ПРЫЖКОВ (С УБЕГАНИЕМ) =====
 spawn(function()
     while true do
         wait(0.2)
@@ -481,10 +493,30 @@ spawn(function()
         local root = char:FindFirstChild("HumanoidRootPart")
         if not root then continue end
 
+        -- НИКАКИХ ПРЫЖКОВ В ЛОББИ
         if isInLobby(root.Position) then
             continue
         end
 
+        -- Если ты НЕ убийца и убийца рядом — УБЕГАЕМ (а не прыгаем)
+        if Murderer ~= p.Name and isMurdererNear(root.Position) then
+            local murdererPos = getMurdererPos()
+            if murdererPos then
+                escapeFromMurderer(root.Position, murdererPos)
+                continue
+            end
+        end
+
+        -- Если ты убийца и рядом шериф/герой — УБЕГАЕМ
+        if Murderer == p.Name and isSheriffOrHeroNear(root.Position) then
+            if g and g.sl then g.sl.Text = "🏃 Убегаю от шерифа!" end
+            local escapePos = root.Position + Vector3.new(math.random(-50, 50), 0, math.random(-50, 50))
+            walkToTarget(escapePos)
+            wait(0.5)
+            continue
+        end
+
+        -- Если застрял — прыгаем (только если не в лобби)
         if isStuck(root) then
             spamJump()
             wait(0.05)
@@ -492,20 +524,7 @@ spawn(function()
             continue
         end
 
-        if Murderer ~= p.Name and isMurdererNear(root.Position) then
-            spamJump()
-            wait(0.05)
-            spamJump()
-            continue
-        end
-
-        if Murderer == p.Name and isSheriffOrHeroNear(root.Position) then
-            spamJump()
-            wait(0.05)
-            spamJump()
-            continue
-        end
-
+        -- Случайные прыжки
         if math.random(1, 100) < 15 then
             spamJump()
         end
@@ -715,7 +734,7 @@ local tl = Instance.new("TextLabel")
 tl.Size = UDim2.new(1, 0, 0, 25)
 tl.Position = UDim2.new(0, 0, 0, 5)
 tl.BackgroundTransparency = 1
-tl.Text = "MECHANIK HUB V12"
+tl.Text = "MECHANIK HUB V13"
 tl.TextColor3 = Color3.fromRGB(0, 255, 200)
 tl.TextScaled = true
 tl.Font = Enum.Font.GothamBold
@@ -787,4 +806,4 @@ afkStatus.Parent = f
 y = y + 25
 
 g = { sl = sl, cl = cl, timer = timerLabel }
-print("MECHANIK HUB V12 загружен! Шериф и голосование исправлены.")
+print("MECHANIK HUB V13 загружен! Убегание от убийцы + нет прыжков в лобби.")
