@@ -1,4 +1,4 @@
--- MECHANIK HUB V13 - УБЕГАНИЕ ОТ УБИЙЦЫ + НЕТ ПРЫЖКОВ В ЛОББИ
+-- MECHANIK HUB V14 - РЕДКИЕ ПРЫЖКИ + ПОСЛЕДОВАТЕЛЬНЫЙ СБОР МОНЕТ
 local p = game.Players.LocalPlayer
 local r = false
 local c = 0
@@ -36,6 +36,12 @@ local MAX_RUNTIME = 6 * 3600
 local runtime = 0
 local autoShutdownEnabled = true
 local sessionTime = 0
+
+-- ===== НОВЫЕ ПЕРЕМЕННЫЕ ДЛЯ ПРЫЖКОВ =====
+local lastJumpTime = 0
+local jumpCooldown = 0
+local currentTarget = nil
+local isWalkingToTarget = false
 
 local path = PathfindingService:CreatePath({
     AgentRadius = 3.5,
@@ -115,12 +121,10 @@ local function getGun(char)
     return nil
 end
 
--- ===== УБЕГАНИЕ ОТ УБИЙЦЫ =====
 local function escapeFromMurderer(rootPos, murdererPos)
     if not murdererPos then return false end
     local dir = (rootPos - murdererPos).Unit
     local escapePos = rootPos + dir * ESCAPE_DISTANCE + Vector3.new(math.random(-10, 10), 0, math.random(-10, 10))
-    -- Ограничиваем по Y, чтобы не улететь
     escapePos = Vector3.new(escapePos.X, rootPos.Y, escapePos.Z)
     if g and g.sl then g.sl.Text = "🏃 Убегаю от убийцы!" end
     walkToTarget(escapePos)
@@ -181,16 +185,31 @@ local function isRoundActive()
     return false
 end
 
-local function spamJump()
+-- ===== НОВАЯ ФУНКЦИЯ ПРЫЖКА (ТОЛЬКО 1 ПРЫЖОК, НЕ ЧАЩЕ РАЗА В 10-15 СЕКУНД) =====
+local function doJump()
     local char = p.Character
     if not char then return end
-    -- НЕ ПРЫГАЕМ В ЛОББИ
     local root = char:FindFirstChild("HumanoidRootPart")
     if root and isInLobby(root.Position) then
         return
     end
+    
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
+    
+    -- Проверяем, не в воздухе ли уже (чтобы не было серии прыжков)
+    if hum.FloorMaterial == Enum.Material.Air then
+        return
+    end
+    
+    local currentTime = tick()
+    if currentTime - lastJumpTime < jumpCooldown then
+        return
+    end
+    
+    lastJumpTime = currentTime
+    jumpCooldown = math.random(10, 15) -- 10-15 секунд между прыжками
+    
     hum:ChangeState(Enum.HumanoidStateType.Jumping)
 end
 
@@ -418,7 +437,6 @@ local function autoKill()
         local root = char:FindFirstChild("HumanoidRootPart")
         if not hum or not root or hum.Health <= 0 then continue end
 
-        -- Проверяем, не нужно ли убегать от шерифа/героя
         if isSheriffOrHeroNear(root.Position) then
             if g and g.sl then g.sl.Text = "🏃 Убегаю от шерифа!" end
             local escapePos = root.Position + Vector3.new(math.random(-50, 50), 0, math.random(-50, 50))
@@ -428,9 +446,9 @@ local function autoKill()
         end
 
         if isStuck(root) then
-            spamJump()
+            doJump()
             wait(0.05)
-            spamJump()
+            doJump()
         end
 
         local knife = getKnife(char)
@@ -483,7 +501,7 @@ local function autoKill()
     end
 end
 
--- ===== ОБНОВЛЁННЫЙ ЦИКЛ ПРЫЖКОВ (С УБЕГАНИЕМ) =====
+-- ===== ОБНОВЛЁННЫЙ ЦИКЛ (РЕДКИЕ ПРЫЖКИ + НЕТ КОЛЕБАНИЙ) =====
 spawn(function()
     while true do
         wait(0.2)
@@ -498,7 +516,7 @@ spawn(function()
             continue
         end
 
-        -- Если ты НЕ убийца и убийца рядом — УБЕГАЕМ (а не прыгаем)
+        -- Если ты НЕ убийца и убийца рядом — УБЕГАЕМ
         if Murderer ~= p.Name and isMurdererNear(root.Position) then
             local murdererPos = getMurdererPos()
             if murdererPos then
@@ -516,18 +534,15 @@ spawn(function()
             continue
         end
 
-        -- Если застрял — прыгаем (только если не в лобби)
+        -- Если застрял — прыгаем (только 1 прыжок!)
         if isStuck(root) then
-            spamJump()
-            wait(0.05)
-            spamJump()
+            doJump()
+            wait(0.1)
             continue
         end
 
-        -- Случайные прыжки
-        if math.random(1, 100) < 15 then
-            spamJump()
-        end
+        -- ОДИН РЕДКИЙ ПРЫЖОК (раз в 10-15 секунд, только 1 прыжок)
+        doJump()
     end
 end)
 
@@ -543,6 +558,7 @@ function resetCounter()
     if g and g.cl then g.cl.Text = "0 / 45" end
 end
 
+-- ===== НОВАЯ ФУНКЦИЯ ФАРМА (ПОСЛЕДОВАТЕЛЬНЫЙ СБОР) =====
 function F()
     if r then return end
     r = true
@@ -624,6 +640,7 @@ function F()
                 if g then g.sl.Text = "Продолжаю..." end
             end
 
+            -- ===== ПОСЛЕДОВАТЕЛЬНЫЙ СБОР (1 монета за раз) =====
             local target = nil
             local minDist = math.huge
             for _, v in ipairs(coins:GetDescendants()) do
@@ -646,7 +663,14 @@ function F()
                     continue
                 end
 
+                -- Идём к монете
                 walkToTarget(target.Position)
+                -- Ждём, пока подойдём или пока монета исчезнет
+                local startTime = tick()
+                while target.Parent and (rt.Position - target.Position).Magnitude > 10 and tick() - startTime < 5 do
+                    task.wait(0.1)
+                end
+                -- Проверяем, собрали ли мы её
                 if (rt.Position - target.Position).Magnitude < 10 then
                     c = c + 1
                     co[target] = true
@@ -734,7 +758,7 @@ local tl = Instance.new("TextLabel")
 tl.Size = UDim2.new(1, 0, 0, 25)
 tl.Position = UDim2.new(0, 0, 0, 5)
 tl.BackgroundTransparency = 1
-tl.Text = "MECHANIK HUB V13"
+tl.Text = "MECHANIK HUB V14"
 tl.TextColor3 = Color3.fromRGB(0, 255, 200)
 tl.TextScaled = true
 tl.Font = Enum.Font.GothamBold
@@ -806,4 +830,4 @@ afkStatus.Parent = f
 y = y + 25
 
 g = { sl = sl, cl = cl, timer = timerLabel }
-print("MECHANIK HUB V13 загружен! Убегание от убийцы + нет прыжков в лобби.")
+print("MECHANIK HUB V14 загружен! Редкие прыжки + последовательный сбор монет.")
