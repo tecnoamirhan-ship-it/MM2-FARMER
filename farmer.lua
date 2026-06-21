@@ -1,4 +1,4 @@
--- MECHANIK HUB V11 - ПОЛНАЯ ВЕРСИЯ (БЕЗ ОШИБОК)
+-- MECHANIK HUB V12 - ИСПРАВЛЕННЫЙ (Шериф + голосование)
 local p = game.Players.LocalPlayer
 local r = false
 local c = 0
@@ -89,17 +89,35 @@ local function getKnife(char)
     return nil
 end
 
+-- ===== УЛУЧШЕННЫЙ ПОИСК ПИСТОЛЕТА =====
 local function getGun(char)
     char = char or p.Character
     if not char then return nil end
+    
+    -- Ищем в руках
     for _, v in ipairs(char:GetChildren()) do
-        if v:IsA("Tool") and (v:FindFirstChild("GunScriptR15") or v:FindFirstChild("GunScriptR6") or v:FindFirstChild("GunServer") or v.Name:lower():find("gun")) then
-            return v
+        if v:IsA("Tool") then
+            local name = v.Name:lower()
+            if name:find("gun") or name:find("pistol") or name:find("revolver") or name:find("sheriff") then
+                return v
+            end
+            -- Проверяем по скриптам
+            if v:FindFirstChild("GunScriptR15") or v:FindFirstChild("GunScriptR6") or v:FindFirstChild("GunServer") then
+                return v
+            end
         end
     end
+    
+    -- Ищем в бекпаке
     for _, v in ipairs(p.Backpack:GetChildren()) do
-        if v:IsA("Tool") and (v:FindFirstChild("GunScriptR15") or v:FindFirstChild("GunScriptR6") or v:FindFirstChild("GunServer") or v.Name:lower():find("gun")) then
-            return v
+        if v:IsA("Tool") then
+            local name = v.Name:lower()
+            if name:find("gun") or name:find("pistol") or name:find("revolver") or name:find("sheriff") then
+                return v
+            end
+            if v:FindFirstChild("GunScriptR15") or v:FindFirstChild("GunScriptR6") or v:FindFirstChild("GunServer") then
+                return v
+            end
         end
     end
     return nil
@@ -237,11 +255,22 @@ local function randomMouseMove()
     end)
 end
 
+-- ===== ИСПРАВЛЕННОЕ ГОЛОСОВАНИЕ =====
 local function voteForMap()
-    if not isInLobby(p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character.HumanoidRootPart.Position) then
+    local char = p.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    -- ЕСЛИ МЫ УЖЕ НА КАРТЕ (НЕ В ЛОББИ) — НЕ ГОЛОСУЕМ
+    if not isInLobby(root.Position) then
         return
     end
-    if isRoundActive() then return end
+    
+    -- ЕСЛИ РАУНД УЖЕ АКТИВЕН — НЕ ГОЛОСУЕМ
+    if isRoundActive() then
+        return
+    end
 
     if g and g.sl then g.sl.Text = "🗳 Иду выбирать карту..." end
 
@@ -263,6 +292,7 @@ local function voteForMap()
     if g and g.sl then g.sl.Text = "✅ Проголосовал, жду раунд" end
 end
 
+-- ===== ИСПРАВЛЕННЫЙ РЕЖИМ ШЕРИФА =====
 local function sheriffMode()
     while r and farmMode and Sheriff == p.Name do
         task.wait(0.1)
@@ -271,6 +301,32 @@ local function sheriffMode()
         local hum = char:FindFirstChildOfClass("Humanoid")
         local root = char:FindFirstChild("HumanoidRootPart")
         if not hum or not root or hum.Health <= 0 then continue end
+
+        -- СНАЧАЛА БЕРЁМ ПИСТОЛЕТ
+        local gun = getGun(char)
+        if not gun then
+            if g and g.sl then g.sl.Text = "🔫 Ищу пистолет..." end
+            -- Проверяем бекпак
+            for _, v in ipairs(p.Backpack:GetChildren()) do
+                if v:IsA("Tool") then
+                    local name = v.Name:lower()
+                    if name:find("gun") or name:find("pistol") or name:find("revolver") or name:find("sheriff") then
+                        v.Parent = char
+                        gun = v
+                        break
+                    end
+                end
+            end
+            if not gun then
+                task.wait(1)
+                continue
+            end
+        end
+
+        -- ЭКИПИРУЕМ ПИСТОЛЕТ
+        pcall(function()
+            hum:EquipTool(gun)
+        end)
 
         if not Murderer then
             if g and g.sl then g.sl.Text = "🔍 Убийца не найден" end
@@ -302,13 +358,6 @@ local function sheriffMode()
             continue
         end
 
-        local gun = getGun(char)
-        if not gun then
-            if g and g.sl then g.sl.Text = "🔫 Нет пистолета!" end
-            task.wait(1)
-            continue
-        end
-
         if g and g.sl then g.sl.Text = "🎯 Навожусь..." end
         pcall(function()
             workspace.CurrentCamera.CFrame = CFrame.lookAt(root.Position, tRoot.Position)
@@ -317,6 +366,7 @@ local function sheriffMode()
         task.wait(math.random(0.5, 1.5))
         randomMouseMove()
 
+        -- ПЕРВЫЙ ВЫСТРЕЛ (всегда промах)
         if g and g.sl then g.sl.Text = "💨 Промах!" end
         pcall(function()
             local fakeTarget = tRoot.Position + Vector3.new(math.random(-10, 10), math.random(-5, 5), math.random(-10, 10))
@@ -331,6 +381,7 @@ local function sheriffMode()
         end)
         task.wait(0.5)
 
+        -- ВТОРОЙ ВЫСТРЕЛ (50% шанс)
         if math.random(1, 100) <= 50 then
             if g and g.sl then g.sl.Text = "🎯 ПОПАЛ!" end
             pcall(function()
@@ -664,7 +715,7 @@ local tl = Instance.new("TextLabel")
 tl.Size = UDim2.new(1, 0, 0, 25)
 tl.Position = UDim2.new(0, 0, 0, 5)
 tl.BackgroundTransparency = 1
-tl.Text = "MECHANIK HUB V11"
+tl.Text = "MECHANIK HUB V12"
 tl.TextColor3 = Color3.fromRGB(0, 255, 200)
 tl.TextScaled = true
 tl.Font = Enum.Font.GothamBold
@@ -736,4 +787,4 @@ afkStatus.Parent = f
 y = y + 25
 
 g = { sl = sl, cl = cl, timer = timerLabel }
-print("MECHANIK HUB V11 загружен! Полная маскировка активирована.")
+print("MECHANIK HUB V12 загружен! Шериф и голосование исправлены.")
